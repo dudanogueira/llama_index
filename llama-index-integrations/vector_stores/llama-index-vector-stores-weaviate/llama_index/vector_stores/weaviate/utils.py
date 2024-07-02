@@ -76,7 +76,12 @@ def class_schema_exists(client: Any, class_name: str) -> bool:
     return client.collections.exists(class_name)
 
 
-def create_default_schema(client: Any, class_name: str) -> None:
+def class_tenant_exists(client: Any, class_name: str, tenant_str) -> bool:
+    validate_client(client)
+    return client.collections.get(class_name).tenants.exists(tenant_str)
+
+
+def create_default_schema(client: Any, class_name: str, tenant: str) -> None:
     """Create default schema."""
     validate_client(client)
     class_schema = {
@@ -84,6 +89,10 @@ def create_default_schema(client: Any, class_name: str) -> None:
         "description": f"Class for {class_name}",
         "properties": NODE_SCHEMA,
     }
+    if tenant:
+        # todo: enable auto_tenant_creation=True, auto_tenant_activation=True
+        # and don't check if tenant texists
+        class_schema["multiTenancyConfig"] = {"enabled": True}
     client.collections.create_from_dict(class_schema)
 
 
@@ -141,6 +150,7 @@ def add_node(
     class_name: str,
     batch: Optional[Any] = None,
     text_key: str = DEFAULT_TEXT_KEY,
+    tenant: str = None,
 ) -> None:
     """Add node."""
     metadata = {}
@@ -150,16 +160,21 @@ def add_node(
         node, remove_text=True, flat_metadata=False
     )
     metadata.update(additional_metadata)
-
+    print(metadata)
     vector = node.get_embedding()
     id = node.node_id
 
     # if batch object is provided (via a context manager), use that instead
     if batch is not None:
         batch.add_object(
-            properties=metadata, collection=class_name, uuid=id, vector=vector
+            properties=metadata,
+            collection=class_name,
+            uuid=id,
+            vector=vector,
+            tenant=tenant,
         )
     else:
-        client.collections.get(class_name).data.insert(
-            properties=metadata, uuid=id, vector=vector
-        )
+        collection = client.collections.get(class_name)
+        if tenant:
+            collection = collection.with_tenant(tenant)
+        collection.data.insert(properties=metadata, uuid=id, vector=vector)

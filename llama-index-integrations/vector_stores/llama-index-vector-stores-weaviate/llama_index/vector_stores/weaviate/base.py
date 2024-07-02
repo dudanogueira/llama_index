@@ -21,6 +21,7 @@ from llama_index.core.vector_stores.utils import DEFAULT_TEXT_KEY
 from llama_index.vector_stores.weaviate.utils import (
     add_node,
     class_schema_exists,
+    class_tenant_exists,
     create_default_schema,
     get_all_properties,
     get_node_similarity,
@@ -131,6 +132,7 @@ class WeaviateVectorStore(BasePydanticVectorStore):
     index_name: str
     url: Optional[str]
     text_key: str
+    tenant: str = None
     auth_config: Dict[str, Any] = Field(default_factory=dict)
     client_kwargs: Dict[str, Any] = Field(default_factory=dict)
 
@@ -143,6 +145,7 @@ class WeaviateVectorStore(BasePydanticVectorStore):
         index_name: Optional[str] = None,
         text_key: str = DEFAULT_TEXT_KEY,
         auth_config: Optional[Any] = None,
+        tenant: Optional[str] = None,
         client_kwargs: Optional[Dict[str, Any]] = None,
         url: Optional[str] = None,
         **kwargs: Any,
@@ -173,15 +176,21 @@ class WeaviateVectorStore(BasePydanticVectorStore):
 
         # create default schema if does not exist
         if not class_schema_exists(self._client, index_name):
-            create_default_schema(self._client, index_name)
+            create_default_schema(self._client, index_name, tenant)
+
+        # if tenant set and it doesn't exist, create
+        if tenant and not class_tenant_exists(self._client, index_name, tenant):
+            self.client.collections.get(index_name).tenants.create([tenant])
 
         super().__init__(
             url=url,
             index_name=index_name,
             text_key=text_key,
+            tenant=tenant,
             auth_config=auth_config.__dict__ if auth_config else {},
             client_kwargs=client_kwargs or {},
         )
+        self.tenant = tenant
 
     @classmethod
     def from_params(
@@ -238,6 +247,7 @@ class WeaviateVectorStore(BasePydanticVectorStore):
                     self.index_name,
                     batch=batch,
                     text_key=self.text_key,
+                    tenant=self.tenant,
                 )
         return ids
 
@@ -278,8 +288,12 @@ class WeaviateVectorStore(BasePydanticVectorStore):
 
     def query(self, query: VectorStoreQuery, **kwargs: Any) -> VectorStoreQueryResult:
         """Query index for top k most similar nodes."""
+
         all_properties = get_all_properties(self._client, self.index_name)
         collection = self._client.collections.get(self.index_name)
+        # if using multi tenant
+        collection = collection.with_tenant(kwargs.get("tenant", self.tenant))
+
         filters = None
 
         # list of documents to constrain search
