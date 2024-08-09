@@ -85,7 +85,24 @@ class SQLRetriever(BaseRetriever):
             query_bundle = str_or_query_bundle
         raw_response_str, metadata = self._sql_database.run_sql(query_bundle.query_str)
         if self._return_raw:
-            return [NodeWithScore(node=TextNode(text=raw_response_str))], metadata
+            return [
+                NodeWithScore(
+                    node=TextNode(
+                        text=raw_response_str,
+                        metadata={
+                            "sql_query": query_bundle.query_str,
+                            "result": metadata["result"],
+                            "col_keys": metadata["col_keys"],
+                        },
+                        excluded_embed_metadata_keys=[
+                            "sql_query",
+                            "result",
+                            "col_keys",
+                        ],
+                        excluded_llm_metadata_keys=["sql_query", "result", "col_keys"],
+                    )
+                )
+            ], metadata
         else:
             # return formatted
             results = metadata["result"]
@@ -132,7 +149,7 @@ class DefaultSQLParser(BaseSQLParser):
         sql_result_start = response.find("SQLResult:")
         if sql_result_start != -1:
             response = response[:sql_result_start]
-        return response.strip().strip("```").strip()
+        return response.strip().strip("```sql").strip("```").strip()
 
 
 class PGVectorSQLParser(BaseSQLParser):
@@ -158,7 +175,7 @@ class PGVectorSQLParser(BaseSQLParser):
             response = response[:sql_result_start]
 
         # this gets you the sql string with [query_vector] placeholders
-        raw_sql_str = response.strip().strip("```").strip()
+        raw_sql_str = response.strip().strip("```sql").strip("```").strip()
         query_embedding = self._embed_model.get_query_embedding(query_bundle.query_str)
         query_embedding_str = str(query_embedding)
         return raw_sql_str.replace("[query_vector]", query_embedding_str)
